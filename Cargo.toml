@@ -1,0 +1,30 @@
+[package]
+name = "unidpp-cli"
+description = "UniDPP command-line verifier: mint passports and Tier-A packs, append typed events, verify offline carriers with real signatures and graded verdicts"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/unidpp/unidpp-cli"
+rust-version = "1.75"
+
+# Dependency-light on purpose (mirrors the unidpp-core doctrine): the
+# crypto, canonical encoding, and verdict machinery all live in the
+# path-dependency crates; the CLI adds only serde_json for document I/O.
+# Argument parsing is hand-rolled (see README.md).
+[dependencies]
+unidpp-model = { path = "../unidpp-core/crates/model" }
+unidpp-event = { path = "../unidpp-core/crates/event" }
+unidpp-tier-a = { path = "../unidpp-core/crates/tier_a" }
+unidpp-verdict = { path = "../unidpp-core/crates/verdict" }
+unidpp-demo = { path = "../unidpp-core/crates/unidpp-demo" }
+unidpp-signatif = { path = "../unidpp-signatif" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lib]
+name = "unidpp_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "unidpp"
+path = "src/main.rs"
