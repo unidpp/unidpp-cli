@@ -26,6 +26,7 @@ pub mod commands;
 pub mod encoding;
 pub mod packfile;
 pub mod passport;
+pub mod qr;
 pub mod report;
 
 /// Process exit codes: the contract with calling scripts and officer

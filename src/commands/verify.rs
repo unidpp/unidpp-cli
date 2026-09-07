@@ -70,6 +70,11 @@ OPTIONS:
     --as-of <TIMESTAMP>    verification moment (default: now)
     --max-age <SECONDS>    freshness window (default 86400; 0 = static /
                            archival semantics: never stale)
+    --image <FILE>         decode a QR carrier from a still photo (PNG)
+                           and verify the pack it carries; a QR holding a
+                           resolver URI is surfaced explicitly
+    --camera               live camera capture (not linked in this build:
+                           photograph the carrier and use --image)
     --encoding <ENC>       force hex or base64 (default: auto-detect)
     --json                 machine-readable report on stdout
 
@@ -438,6 +443,8 @@ pub fn verify_pack_with_anchors(
 #[derive(Debug, Clone, Default)]
 struct VerifyArgs {
     pack: Option<String>,
+    image: Option<String>,
+    camera: bool,
     anchor: Option<String>,
     as_of: Option<String>,
     max_age: Option<i64>,
@@ -451,6 +458,8 @@ fn parse(args: &[String]) -> Result<VerifyArgs, CommandError> {
     while i < args.len() {
         match args[i].as_str() {
             "--anchor" | "-a" => parsed.anchor = Some(take_value(args, &mut i, "--anchor")?),
+            "--image" => parsed.image = Some(take_value(args, &mut i, "--image")?),
+            "--camera" => parsed.camera = true,
             "--as-of" => parsed.as_of = Some(take_value(args, &mut i, "--as-of")?),
             "--max-age" => {
                 let token = take_value(args, &mut i, "--max-age")?;
@@ -674,10 +683,47 @@ fn render_json(
 /// Run the command.
 pub fn run(args: &[String]) -> Result<u8, CommandError> {
     let parsed = parse(args)?;
-    let pack = parsed.pack.clone().ok_or_else(|| {
-        CommandError::Usage("verify: a pack file or encoded pack is required".to_string())
-    })?;
-    let (bytes, encoding) = load_pack_bytes(&pack, parsed.encoding)?;
+    if parsed.camera {
+        // Live capture drags platform media stacks into the binary;
+        // this build links none. State the working path instead of
+        // silently pretending.
+        return Err(CommandError::Usage(
+            "--camera: live capture is not linked in this build — photograph the carrier and \
+             use `unidpp verify --image <photo.png>`"
+                .to_string(),
+        ));
+    }
+    let (bytes, encoding) = match &parsed.image {
+        Some(image) => {
+            let content = crate::qr::decode_png(std::path::Path::new(image))
+                .map_err(|e| CommandError::Usage(format!("--image: {e}")))?;
+            match content {
+                crate::qr::QrContent::Pack(bytes, encoding) => {
+                    if parsed.pack.is_some() {
+                        return Err(CommandError::Usage(
+                            "verify: pass either a pack argument or --image, not both".to_string(),
+                        ));
+                    }
+                    (bytes, encoding)
+                }
+                crate::qr::QrContent::Uri(uri) => {
+                    return Err(CommandError::Usage(format!(
+                        "--image: the QR carries a resolver URI, not the pack: {uri} — resolve \
+                         it (`unidpp resolve`) and verify what comes back"
+                    )));
+                }
+            }
+        }
+        None => {
+            let pack = parsed.pack.clone().ok_or_else(|| {
+                CommandError::Usage(
+                    "verify: a pack file, an encoded pack, or --image <photo.png> is required"
+                        .to_string(),
+                )
+            })?;
+            load_pack_bytes(&pack, parsed.encoding)?
+        }
+    };
     let anchor = match &parsed.anchor {
         Some(hex) => Some(parse_anchor(hex)?),
         None => None,

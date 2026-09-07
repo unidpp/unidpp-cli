@@ -474,3 +474,101 @@ fn help_and_version_work() {
         assert!(String::from_utf8_lossy(&out.stdout).contains("USAGE"));
     }
 }
+
+// ---------------------------------------------------------------------------
+// QR capture (--image): the carrier as a photographed label
+// ---------------------------------------------------------------------------
+
+/// Render text as a QR PNG (the label printer's output shape).
+fn qr_png(content: &str, path: &Path) {
+    let code = qrcode::QrCode::new(content.as_bytes()).expect("qr encode");
+    let modules = code.width();
+    let scale = 8usize;
+    let quiet = 4usize;
+    let size = (modules + 2 * quiet) * scale;
+    let mut pixels = vec![255u8; size * size];
+    for row in 0..modules {
+        for column in 0..modules {
+            if code[(column, row)] == qrcode::Color::Dark {
+                for dy in 0..scale {
+                    for dx in 0..scale {
+                        let x = (quiet + column) * scale + dx;
+                        let y = (quiet + row) * scale + dy;
+                        pixels[y * size + x] = 0;
+                    }
+                }
+            }
+        }
+    }
+    let file = std::fs::File::create(path).unwrap();
+    let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), size as u32, size as u32);
+    encoder.set_color(png::ColorType::Grayscale);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder
+        .write_header()
+        .unwrap()
+        .write_image_data(&pixels)
+        .unwrap();
+}
+
+#[test]
+fn verify_from_a_photographed_qr_label() {
+    let dir = scratch("qr");
+    let passport = mint_passport(&dir, "passport.json");
+    append_custody_event(&passport);
+    let pack = dir.join("pack.hex");
+    pack_with_key(&passport, &pack, "pack-seed");
+    let encoded = std::fs::read_to_string(&pack).unwrap().trim().to_string();
+
+    // The printed label: the pack's QR code.
+    let label = dir.join("label.png");
+    qr_png(&encoded, &label);
+
+    // The officer photographs it and verifies: the full pipeline from
+    // the decoded pixels.
+    let out = run(bin()
+        .arg("verify")
+        .arg("--image")
+        .arg(&label)
+        .args(["--anchor", &anchor_for("pack-seed")]));
+    assert_exit(0, &out, "verify --image");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("Verdict: PASS"), "{stdout}");
+
+    // The JSON report names the carrier.
+    let out = run(bin().arg("verify").arg("--image").arg(&label).args([
+        "--anchor",
+        &anchor_for("pack-seed"),
+        "--json",
+    ]));
+    assert_exit(0, &out, "verify --image --json");
+    let report: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    assert!(report["passport_id"].as_str().is_some());
+
+    // A QR carrying a resolver URI (not the pack) is surfaced
+    // explicitly, never guessed at.
+    let uri_label = dir.join("uri-label.png");
+    qr_png(
+        "https://resolver.unidpp.org/r/urn:unidpp:passport:qr-1",
+        &uri_label,
+    );
+    let out = run(bin()
+        .arg("verify")
+        .arg("--image")
+        .arg(&uri_label)
+        .args(["--anchor", &anchor_for("pack-seed")]));
+    assert_exit(3, &out, "verify --image (uri)");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("resolver URI"), "{stderr}");
+
+    // --camera states its path instead of pretending.
+    let out = run(bin().arg("verify").arg("--camera"));
+    assert_exit(3, &out, "verify --camera");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("--image"), "{stderr}");
+
+    // Both a pack argument and --image is refused.
+    let out = run(bin().arg("verify").arg(&pack).arg("--image").arg(&label));
+    assert_exit(3, &out, "verify pack + --image");
+}
