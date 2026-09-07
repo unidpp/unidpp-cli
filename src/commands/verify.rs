@@ -38,7 +38,7 @@ use unidpp_verdict::{evaluate_freshness, CoverageReport, FreshnessVerdict};
 
 use crate::commands::{parse_timestamp, take_value, CommandError};
 use crate::encoding::{auto_decode, hex_decode, Encoding};
-use crate::packfile::{check_slot, signing_body, SlotCheck};
+use crate::packfile::{check_slot_in, signing_body, SlotCheck};
 use crate::report::{render_table, Finding, Grade};
 
 /// The default freshness window of an offline pack (24 h). The Primmel
@@ -60,9 +60,11 @@ ARGUMENT:
                            pack itself as hex/base64 text
 
 OPTIONS:
-    --anchor <PUBKEY-HEX>  the verifier's pinned issuer public key, raw
-                           hex: 65 bytes (04||X||Y) for ECDSA-P256 or 32
-                           bytes for Ed25519. With no anchor, signature
+    --anchor <PUBKEY>       the verifier's pinned issuer public key:
+                           raw hex (65 bytes 04||X||Y for ECDSA-P256,
+                           32 bytes Ed25519, 1952 bytes ML-DSA-65) or
+                           suite:hex for the ambiguous SM2 form (e.g.
+                           sm2:04ab...). With no anchor, signature
                            slots cannot be verified and the verdict
                            degrades.
     --as-of <TIMESTAMP>    verification moment (default: now)
@@ -191,6 +193,22 @@ pub fn verify_pack(
     now: Timestamp,
     max_age_secs: i64,
 ) -> VerifyOutcome {
+    let anchors: Vec<PublicKey> = anchor.copied().into_iter().collect();
+    verify_pack_with_anchors(bytes, &anchors, now, max_age_secs)
+}
+
+/// Verify a pack against a **set** of pinned anchors — one per
+/// co-signing suite (the sovereign co-signature model). Each filled
+/// slot is checked against the anchor whose key id it names; an
+/// unpinned key id degrades *that slot only* (`UnknownKey`), so a
+/// verifier that pins just the EU P-256 anchor reads the pack as
+/// degraded on the CN SM2 slot, never as globally failed.
+pub fn verify_pack_with_anchors(
+    bytes: &[u8],
+    anchors: &[PublicKey],
+    now: Timestamp,
+    max_age_secs: i64,
+) -> VerifyOutcome {
     let mut findings: Vec<Finding> = Vec::new();
 
     // Stage 1: unpack + schema.
@@ -267,28 +285,25 @@ pub fn verify_pack(
             }
             present += 1;
             distinct_suites.insert(slot.suite);
-            match anchor {
-                None => signature_findings.push(Finding::new(
+            if anchors.is_empty() {
+                signature_findings.push(Finding::new(
                     name,
                     Grade::Degraded,
                     "no anchor supplied: signature present but unverifiable \
                      (verifier without trust configuration)"
                         .to_string(),
-                )),
-                Some(anchor) => {
-                    let check = check_slot(slot, anchor, &body);
-                    let grade = match &check {
-                        SlotCheck::Verified { .. } => {
-                            verified += 1;
-                            Grade::Pass
-                        }
-                        SlotCheck::UnknownKey { .. } | SlotCheck::Deferred { .. } => {
-                            Grade::Degraded
-                        }
-                        SlotCheck::Invalid { .. } => Grade::Fail,
-                    };
-                    signature_findings.push(Finding::new(name, grade, check.detail()));
-                }
+                ));
+            } else {
+                let check = check_slot_in(slot, anchors, &body);
+                let grade = match &check {
+                    SlotCheck::Verified { .. } => {
+                        verified += 1;
+                        Grade::Pass
+                    }
+                    SlotCheck::UnknownKey { .. } | SlotCheck::Deferred { .. } => Grade::Degraded,
+                    SlotCheck::Invalid { .. } => Grade::Fail,
+                };
+                signature_findings.push(Finding::new(name, grade, check.detail()));
             }
         }
     }
@@ -503,12 +518,24 @@ fn load_pack_bytes(
     })
 }
 
-fn parse_anchor(hex: &str) -> Result<PublicKey, CommandError> {
+fn parse_anchor(token: &str) -> Result<PublicKey, CommandError> {
+    // Two grammars: raw hex (length-inferred suite — the historical
+    // form) or `suite:hex` (needed for SM2, whose 65-byte SEC1 point
+    // is indistinguishable from P-256 by encoding alone).
+    if let Some((suite_token, hex)) = token.trim().split_once(':') {
+        let suite = unidpp_signatif::sign::Suite::parse_token(suite_token).map_err(|e| {
+            CommandError::Usage(format!("--anchor: unknown suite `{suite_token}`: {e}"))
+        })?;
+        let bytes = hex_decode(hex).map_err(|e| CommandError::Usage(format!("--anchor: {e}")))?;
+        return unidpp_signatif::keyring::PublicKey::from_bytes_in(suite, &bytes)
+            .map_err(|e| CommandError::Usage(format!("--anchor: {e}")));
+    }
+    let hex = token;
     let bytes = hex_decode(hex).map_err(|e| CommandError::Usage(format!("--anchor: {e}")))?;
     PublicKey::from_bytes(&bytes).map_err(|e| {
         CommandError::Usage(format!(
-            "--anchor: not a public key (expected 65-byte P-256 SEC1 or 32-byte \
-             Ed25519, hex): {e}"
+            "--anchor: not a public key (raw hex: 65-byte SEC1, 32-byte \
+             Ed25519, or 1952-byte ML-DSA-65; or suite:hex, e.g. sm2:<hex>): {e}"
         ))
     })
 }

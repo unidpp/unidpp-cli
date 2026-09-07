@@ -164,7 +164,7 @@ fn tampered_pack_fails() {
 
     // Flip one hex digit in the middle of the pack.
     let mut tampered = encoded.clone();
-    let mid = tampered.len() / 2 & !1; // keep hex alignment
+    let mid = (tampered.len() / 2) & !1; // keep hex alignment
     let flipped = if tampered.as_bytes()[mid] == b'0' {
         '1'
     } else {
