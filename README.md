@@ -15,7 +15,7 @@ Licensed under [Apache-2.0](LICENSE).
 
 ```sh
 cargo build # debug
-cargo test # 50 unit + 14 integration tests
+cargo test # 56 unit + 15 integration tests
 cargo install --path . # installs the `unidpp` binary
 ```
 
@@ -38,9 +38,9 @@ unidpp event --passport <file> --type <EventType> [--data <json>]
 unidpp pack --passport <file> [--budget qr-v15-M] [--key <seed>]
  [--encoding hex|base64] [--out <file>]
 
-unidpp verify <pack-file-or-hex> [--anchor <pubkey-hex>]
+unidpp verify <pack-file-or-hex> [--anchor <pubkey-hex|suite:pubkey-hex>]
  [--as-of <timestamp>] [--max-age <secs>] [--encoding <enc>]
- [--json]
+ [--image <photo.png>] [--camera] [--json]
 
 unidpp resolve <carrier-uri-or-code> [--json]
 
@@ -64,6 +64,55 @@ unidpp pack --passport p.json --key pack-seed --out pack.hex
 # Verifier side (offline; the pack file may be replaced by raw hex).
 unidpp verify pack.hex --anchor 04…
 ```
+
+### Verifying a photographed carrier
+
+`unidpp verify --image photo.png` decodes the QR code from a still
+photograph: the PNG loads via the `png` crate, colour images fold to
+luminance (Rec. 601 — QR's black/white modules survive the fold), and
+`rqrr` (pure Rust) finds and decodes the code. The decoded content is
+classified:
+
+- **pack text** (hex or base64) feeds the normal verify pipeline —
+  the photograph is just another transport;
+- a **resolver URI** is surfaced explicitly (a usage error naming the
+  URI): fetching it is `unidpp resolve`'s job, not the verifier's —
+  resolve first, then verify what comes back.
+
+Passing both a pack argument and `--image` is a usage error.
+`--camera` states its path instead of silently pretending: live
+capture drags platform media stacks with it, so this build does not
+link a camera — photograph the carrier and use `--image`.
+
+```sh
+unidpp verify --image label-photo.png --anchor 04…
+```
+
+### Multi-suite co-signatures
+
+A pack can carry **one signature slot per suite over the same signing
+body** (`unidpp_cli::packfile::sign_pack_suites`) — the sovereign
+co-signature model: one pack body signed once per jurisdiction, e.g.
+ECDSA-P256 for the EU anchor and SM2 for the CN anchor. Suite seeds
+are suite-separated (`pack_suite_seed`: P-256 consumes the base seed
+verbatim so existing anchors keep verifying; every other suite gets
+domain-hashed material), so one base seed never yields a shared
+scalar across curves.
+
+On the verification side each slot is routed to the anchor whose key
+id it names (`check_slot_in`); a key the verifier has not pinned
+degrades **that slot only**, never the whole verdict. The
+single-anchor CLI flag accepts raw hex (65-byte SEC1 ECDSA-P256,
+32-byte Ed25519, or 1952-byte ML-DSA-65) or the `suite:hex` grammar
+for SM2's ambiguous SEC1 form:
+
+```sh
+unidpp verify pack.hex --anchor sm2:04ab…
+```
+
+The library exposes the full co-signature form
+(`unidpp_cli::commands::verify::verify_pack_with_anchors` takes the
+anchor set); `unidpp-issuer` drives it for its `/verdict` pipeline.
 
 ## Exit codes
 
@@ -159,6 +208,7 @@ src/lib.rs library root and the exit-code contract
 src/passport.rs the passport document (mint/load/save)
 src/packfile.rs budget grammar, signing body, slot checks
 src/carrier.rs carrier adapter (GS1 DL / GB/T 33993 / EAN-13 / URN)
+src/qr.rs QR capture from a still photo (PNG → luminance → rqrr)
 src/encoding.rs hex + base64 codecs
 src/report.rs grades, findings, tables
 src/commands/ one module per subcommand
