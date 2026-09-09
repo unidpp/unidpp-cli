@@ -21,6 +21,8 @@ use crate::exit;
 /// The sealed segment's plaintext (NEVER printed — the point).
 const SEALED_STATE: &[u8] = b"cycle_count=412,voltage=3.71,temp=28.4";
 
+/// Run the grid demo (G-GRID): the whole Phase-1 pipeline, verdicts
+/// printed; exit PASS only when every check holds.
 pub fn run() -> Result<u8, CommandError> {
     let mut ok = 0usize;
     let mut total = 0usize;
