@@ -7,6 +7,11 @@
 pub mod create;
 pub mod demo;
 pub mod event;
+pub mod grid;
+
+/// `unidpp grid` — the G-GRID demo: one subject, two sovereignty
+/// segments (one sealed), the spine — assurance without access.
+pub const GRID_USAGE: &str = "unidpp grid — the grid demo (no arguments)";
 pub mod pack;
 pub mod resolve;
 pub mod verify;
@@ -47,6 +52,7 @@ pub fn command_usage(command: &str) -> Option<&'static str> {
         "verify" => verify::USAGE,
         "resolve" => resolve::USAGE,
         "demo" => demo::USAGE,
+        "grid" => GRID_USAGE,
         _ => return None,
     })
 }
@@ -97,6 +103,7 @@ pub fn dispatch(args: &[String]) -> Result<u8, CommandError> {
         "verify" => verify::run(rest),
         "resolve" => resolve::run(rest),
         "demo" => demo::run(rest),
+        "grid" => grid::run(),
         "help" | "--help" | "-h" => {
             if let Some(sub) = rest.first() {
                 let usage = command_usage(sub).ok_or_else(|| {
@@ -164,7 +171,9 @@ mod tests {
 
     #[test]
     fn every_command_has_help() {
-        for command in ["create", "event", "pack", "verify", "resolve", "demo"] {
+        for command in [
+            "create", "event", "pack", "verify", "resolve", "demo", "grid",
+        ] {
             assert!(
                 command_usage(command).is_some(),
                 "missing usage text for {command}"
