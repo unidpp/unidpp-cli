@@ -361,30 +361,70 @@ pub fn run(rest: &[String]) -> Result<u8, CommandError> {
         "urn:unidpp:profile:eu-battery",
         at_now,
     );
+    let static_entry = CoverageEntry {
+        class: "eu-static".into(),
+        element_set: "urn:unidpp:elements:battery-static".into(),
+        evidence: EvidenceKind::VerifiedDirect,
+        governing_policy: "eu-static-open".into(),
+        governing_policy_version: 1,
+        reading: "conformant".into(),
+        as_of: at_now.into(),
+    };
+    let dynamic_entry = CoverageEntry {
+        class: "cn-dynamic".into(),
+        element_set: "urn:unidpp:elements:bms-dynamic".into(),
+        evidence: evidence_of(sealed_grade),
+        governing_policy: attestation.statement.governing_policy.clone(),
+        governing_policy_version: attestation.statement.governing_policy_version,
+        reading: attestation.statement.value.clone(),
+        as_of: attestation.statement.as_of.clone(),
+    };
     report
-        .entry(CoverageEntry {
-            class: "eu-static".into(),
-            element_set: "urn:unidpp:elements:battery-static".into(),
-            evidence: EvidenceKind::VerifiedDirect,
-            governing_policy: "eu-static-open".into(),
-            governing_policy_version: 1,
-            reading: "conformant".into(),
-            as_of: at_now.into(),
+        .entry(static_entry.clone())
+        .entry(dynamic_entry.clone());
+    // SI-11: the recorded verification route — the report's
+    // replayable trace. Re-running the route reproduces the verdict
+    // byte-identically (the acceptance bar's route clause).
+    use unidpp_s13::route::{RouteStep, VerificationRoute};
+    let mut route = VerificationRoute::new();
+    route
+        .step(RouteStep::Resolve {
+            subject: "urn:unidpp:passport:pack-0001".into(),
         })
-        .entry(CoverageEntry {
-            class: "cn-dynamic".into(),
-            element_set: "urn:unidpp:elements:bms-dynamic".into(),
-            evidence: evidence_of(sealed_grade),
-            governing_policy: attestation.statement.governing_policy.clone(),
-            governing_policy_version: attestation.statement.governing_policy_version,
-            reading: attestation.statement.value.clone(),
-            as_of: attestation.statement.as_of.clone(),
+        .step(RouteStep::Transport {
+            mode: "document".into(),
+            counterpart: "de-zoll".into(),
+        })
+        .step(RouteStep::Document {
+            kind: "frozen-view".into(),
+            digest: report_digest_of(&report),
+        })
+        .step(RouteStep::Substitution {
+            data_class: "cn-dynamic".into(),
+            service: "cn-attestation-service".into(),
+        })
+        .step(RouteStep::Classify {
+            entry: static_entry.clone(),
+        })
+        .step(RouteStep::Classify {
+            entry: dynamic_entry.clone(),
         });
+    report.route = Some(route.clone());
+    let replayed = route.replay(
+        "urn:unidpp:passport:pack-0001",
+        "urn:unidpp:profile:eu-battery",
+        at_now,
+    );
     let coverage = report.summary();
     check(
         "the verdict is a coverage report object, naming the governing policy",
         coverage.contains("verified-direct") && coverage.contains("attested-by-authority"),
         &coverage,
+    );
+    check(
+        "the recorded route replays the verdict byte-identically (SI-11)",
+        replayed.digest() == report.digest(),
+        &format!("route {} steps, replay digest matches", route.steps.len()),
     );
 
     // XB-5: the dossier — everything the foreign verifier needs, as
@@ -486,6 +526,10 @@ pub fn run(rest: &[String]) -> Result<u8, CommandError> {
     } else {
         Ok(exit::FAIL)
     }
+}
+
+fn report_digest_of(report: &unidpp_s13::coverage::CoverageReport) -> [u8; 32] {
+    report.digest()
 }
 
 fn parse_value_flag(rest: &[String], flag: &str) -> Option<String> {
