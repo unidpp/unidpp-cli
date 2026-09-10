@@ -23,7 +23,8 @@ const SEALED_STATE: &[u8] = b"cycle_count=412,voltage=3.71,temp=28.4";
 
 /// Run the grid demo (G-GRID): the whole Phase-1 pipeline, verdicts
 /// printed; exit PASS only when every check holds.
-pub fn run() -> Result<u8, CommandError> {
+pub fn run(rest: &[String]) -> Result<u8, CommandError> {
+    let dossier_path = parse_dossier_flag(rest);
     let mut ok = 0usize;
     let mut total = 0usize;
     let mut check = |label: &str, passed: bool, detail: &str| {
@@ -57,6 +58,18 @@ pub fn run() -> Result<u8, CommandError> {
         graph.node(&NodeId::new("cn-samr").unwrap()).is_some(),
         "cn-samr (segment authority), weilian-shenzhen (custodian)",
     );
+
+    // The verifier's own key (its S13 requests carry its signature).
+    let de_zoll_key = KeyPair::seeded(Suite::Ed25519, b"ggrid/de-zoll").map_err(fail)?;
+    {
+        let mut node =
+            DelegationNode::new(NodeId::new("de-zoll").map_err(fail)?, NodeKind::Delegated);
+        node.register(RegisteredKey {
+            key_id: KeyId::of(de_zoll_key.public()),
+            public: *de_zoll_key.public(),
+        });
+        graph.add_node(node);
+    }
 
     // -- The policies: the constitution of each segment, signed by
     //    the authority. One open (EU static data), one sealed.
@@ -373,6 +386,38 @@ pub fn run() -> Result<u8, CommandError> {
         &coverage,
     );
 
+    // XB-5: the dossier — everything the foreign verifier needs, as
+    // signed documents. The offline path (`unidpp dossier <path>`)
+    // re-derives this verdict with zero calls to any live system.
+    if let Some(path) = dossier_path {
+        use unidpp_signatif::dossier::Dossier;
+        use unidpp_signatif::s13::{
+            S13Journal, S13JournalEntry, S13Side, SignedS13Request, SignedS13Response,
+        };
+        let signed_request =
+            SignedS13Request::issue(request.clone(), "de-zoll", &de_zoll_key).map_err(fail)?;
+        let signed_response =
+            SignedS13Response::issue(response.clone(), &custodian_key).map_err(fail)?;
+        let mut journal = S13Journal::new(S13Side::Custodian);
+        journal.append(S13JournalEntry::Request(signed_request));
+        journal.append(S13JournalEntry::Response(signed_response));
+        let eu_proof = signed_spine
+            .spine
+            .proof("eu-static")
+            .ok_or_else(|| CommandError::Failure("no eu proof".into()))?;
+        let dossier = Dossier {
+            subject: "urn:unidpp:passport:pack-0001".into(),
+            policies: vec![open_policy, sealed_policy],
+            spine: signed_spine.clone(),
+            proofs: vec![eu_proof, proof.clone()],
+            attestations: vec![attestation.clone()],
+            journal,
+        };
+        std::fs::write(&path, dossier.to_json().map_err(fail)?)
+            .map_err(|e| CommandError::Failure(format!("dossier write {path}: {e}")))?;
+        println!("  dossier written: {path} — documents, not API calls (XB-5)");
+    }
+
     println!();
     println!(
         "grid verdict: {}/{} — the sealed segment is PROVEN without being SEEN",
@@ -383,6 +428,16 @@ pub fn run() -> Result<u8, CommandError> {
     } else {
         Ok(exit::FAIL)
     }
+}
+
+fn parse_dossier_flag(rest: &[String]) -> Option<String> {
+    let mut it = rest.iter();
+    while let Some(arg) = it.next() {
+        if arg == "--dossier" {
+            return it.next().cloned();
+        }
+    }
+    None
 }
 
 fn hex_prefix(bytes: &[u8; 32]) -> String {
