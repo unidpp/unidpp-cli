@@ -516,6 +516,67 @@ pub fn run(rest: &[String]) -> Result<u8, CommandError> {
         }
     }
 
+    // SI-6: provenance coverage over the ancestry — the pack's
+    // upstream chain: an open cell-lot edge, a sealed supplier edge
+    // (the attestation already in hand), a missing recycled-input
+    // edge. The three-way report.
+    use unidpp_signatif::provenance::{traverse, AncestryEdge, EdgeEvidence};
+    let ancestry = vec![
+        AncestryEdge {
+            ancestor: "urn:unidpp:passport:cell-lot-h2231".into(),
+            descendant: "urn:unidpp:passport:pack-0001".into(),
+            relationship: "derivation".into(),
+        },
+        AncestryEdge {
+            ancestor: "urn:unidpp:passport:supplier-module".into(),
+            descendant: "urn:unidpp:passport:pack-0001".into(),
+            relationship: "installation".into(),
+        },
+        AncestryEdge {
+            ancestor: "urn:unidpp:passport:recycled-input".into(),
+            descendant: "urn:unidpp:passport:supplier-module".into(),
+            relationship: "derivation".into(),
+        },
+    ];
+    let held_attestation = attestation.clone();
+    let ancestry_report = traverse(
+        "urn:unidpp:passport:pack-0001",
+        &ancestry,
+        |edge| {
+            if edge.ancestor.contains("cell-lot") {
+                EdgeEvidence::Open {
+                    bytes: open_state.to_vec(),
+                }
+            } else if edge.ancestor.contains("supplier-module") {
+                EdgeEvidence::Sealed {
+                    attestation: held_attestation.clone(),
+                }
+            } else {
+                EdgeEvidence::Missing {
+                    reason: "recycled-input edge unresolvable from this verifier".into(),
+                }
+            }
+        },
+        &graph,
+    );
+    check(
+        "provenance: the ancestry renders the three-way report (SI-6)",
+        ancestry_report.edges.len() == 3
+            && ancestry_report
+                .edges
+                .iter()
+                .any(|g| g.coverage == unidpp_s13::coverage::EvidenceKind::VerifiedDirect)
+            && ancestry_report
+                .edges
+                .iter()
+                .any(|g| g.coverage == unidpp_s13::coverage::EvidenceKind::AttestedByAuthority)
+            && ancestry_report
+                .edges
+                .iter()
+                .any(|g| g.coverage == unidpp_s13::coverage::EvidenceKind::ExplicitlyUnavailable),
+        &ancestry_report.summary(),
+    );
+
     println!();
     println!(
         "grid verdict: {}/{} — the sealed segment is PROVEN without being SEEN",
