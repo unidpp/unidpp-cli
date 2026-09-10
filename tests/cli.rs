@@ -342,14 +342,24 @@ fn event_appends_and_state_advances() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("suspended"), "{stdout}");
 
-    // Illegal transitions are rejected as usage errors (I6).
+    // Legal under spec table 2: suspended -> archived.
     let out = run(bin().args(["event", "--passport"]).arg(&passport).args([
         "--type",
         "status.change",
         "--data",
         r#"{"from":"suspended","to":"archived","authority":"reg-1"}"#,
     ]));
-    assert_exit(3, &out, "illegal transition");
+    assert_exit(0, &out, "suspended -> archived is legal (spec table 2)");
+
+    // Illegal transitions are rejected as usage errors (I6): archived
+    // is terminal — nothing leaves it.
+    let out = run(bin().args(["event", "--passport"]).arg(&passport).args([
+        "--type",
+        "status.change",
+        "--data",
+        r#"{"from":"archived","to":"issued","authority":"reg-1"}"#,
+    ]));
+    assert_exit(3, &out, "illegal transition (archived is terminal)");
 
     // A recall event flips the safety flag and the pack fails outright.
     let out = run(bin().args(["event", "--passport"]).arg(&passport).args([
