@@ -20,6 +20,7 @@ unidpp-demo = { path = "../unidpp-core/crates/unidpp-demo" }
 unidpp-signatif = { path = "../unidpp-signatif", features = ["sm2", "ml-dsa"] }
 unidpp-grid = { path = "../unidpp-core/crates/grid" }
 unidpp-s13 = { path = "../unidpp-core/crates/s13" }
+unidpp-dppr = { path = "../unidpp-core/crates/dppr" }
 # QR capture path: rqrr (pure-Rust decoder) over a grayscale grid;
 # png for still-image input. The camera dependency (nokhwa) is the
 # opt-in `camera` feature — the default build stays light.

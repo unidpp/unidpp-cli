@@ -108,6 +108,8 @@ pub fn run(rest: &[String]) -> Result<u8, CommandError> {
         &samr_key,
     )
     .map_err(fail)?;
+    let open_policy_model = open_policy.policy.clone();
+    let sealed_policy_model = sealed_policy.policy.clone();
     check(
         "policies signed by the authority",
         open_policy.verify(&graph).is_ok() && sealed_policy.verify(&graph).is_ok(),
@@ -575,6 +577,57 @@ pub fn run(rest: &[String]) -> Result<u8, CommandError> {
                 .iter()
                 .any(|g| g.coverage == unidpp_s13::coverage::EvidenceKind::ExplicitlyUnavailable),
         &ancestry_report.summary(),
+    );
+
+    // RT-4 (Part 10, DPP-R): retrieval-time policy evaluation — a
+    // machine-verifier client asks for the battery passport; the
+    // open class is served, the sealed class is withheld WITH a
+    // coverage entry and an attestation-offer pointer. Never a bare
+    // refusal.
+    use unidpp_dppr::{serve_class, Representation, RetrievalRequest, RetrievalResponse};
+    let machine_verifier = RetrievalRequest {
+        passport_id: "urn:unidpp:passport:pack-0001".into(),
+        profile_context: Some("urn:unidpp:profile:eu-battery".into()),
+        as_of: Some("2030-06-01T08:30:00Z".into()),
+        data_classes: vec![],
+        representation: Representation::FrozenView,
+        language: Some("en".into()),
+        authorization: None,
+    };
+    let mut served = Vec::new();
+    let mut withheld = Vec::new();
+    for (class, policy) in [
+        ("eu-static", &open_policy_model),
+        ("cn-dynamic", &sealed_policy_model),
+    ] {
+        match serve_class(&machine_verifier, class, policy) {
+            Ok(()) => served.push(class.to_string()),
+            Err(w) => withheld.push(w),
+        }
+    }
+    let dpp_response = RetrievalResponse {
+        passport_id: "urn:unidpp:passport:pack-0001".into(),
+        representation: Representation::FrozenView,
+        descriptor: unidpp_model::BATTERY_FROZEN,
+        served,
+        withheld,
+        as_of: "2030-06-01T08:30:00Z".into(),
+    };
+    check(
+        "retrieval: sealed class withheld WITH coverage and an offer pointer (RT-4)",
+        dpp_response.served == ["eu-static"]
+            && dpp_response.withheld.len() == 1
+            && dpp_response.withheld[0].governing_policy == "cn-dynamic-bms"
+            && dpp_response.withheld[0]
+                .offer
+                .as_deref()
+                .is_some_and(|o| o.contains("attestation")),
+        &format!(
+            "served {} · withheld {} (offer: {})",
+            dpp_response.served.join(","),
+            dpp_response.withheld[0].data_class,
+            dpp_response.withheld[0].offer.clone().unwrap_or_default()
+        ),
     );
 
     println!();
