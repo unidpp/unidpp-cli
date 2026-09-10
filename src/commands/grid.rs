@@ -83,7 +83,7 @@ pub fn run() -> Result<u8, CommandError> {
             version: 1,
             authority: "cn-samr".into(),
             readers: vec!["cn-customs".into()],
-            verifiers: vec!["cn-customs".into()],
+            verifiers: vec!["cn-customs".into(), "de-zoll".into()],
             writers: vec!["weilian-shenzhen".into()],
             reveal: RevealClass::OriginSealed,
             suites: vec!["sm2".into()],
@@ -220,6 +220,105 @@ pub fn run() -> Result<u8, CommandError> {
         "stale policy detected at verification",
         !stale.fresh.is_current(),
         &format!("graded {} (v1 superseded by v2)", stale.fresh.label()),
+    );
+
+    // -- The cross-border moment (Phase 2): the EU verifier asks;
+    //    the policy offers substitution; the verdict is
+    //    coverage-graded (XB-1..3).
+    use unidpp_s13::{S13Outcome, S13Request, S13Response};
+    let request = S13Request {
+        verifier: "de-zoll".into(),
+        subject: "urn:unidpp:passport:pack-0001".into(),
+        profile: "urn:unidpp:profile:eu-battery".into(),
+        segment: "cn-dynamic".into(),
+        at: "2030-06-01T08:00:00Z".into(),
+    };
+    let response = S13Response::evaluate(&request, &sealed_policy.policy, "weilian-shenzhen");
+    check(
+        "S13: the sealed policy offers ATTESTATION, not data",
+        matches!(response.outcome, S13Outcome::AttestationOffer { .. }),
+        &format!(
+            "governing policy {} v{} (outcome cited by name)",
+            response.governing_policy, response.governing_policy_version
+        ),
+    );
+    let unlisted = S13Request {
+        verifier: "random-party".into(),
+        ..request.clone()
+    };
+    let denied = S13Response::evaluate(&unlisted, &sealed_policy.policy, "weilian-shenzhen");
+    check(
+        "S13: an unlisted verifier is DENIED, stated",
+        matches!(denied.outcome, S13Outcome::Deny { .. }),
+        "never silent",
+    );
+
+    // The sovereign attestation substitutes (XB-2): the CN service
+    // attests ABOUT the sealed commitment; the EU verifier accepts
+    // under its own anchors.
+    use unidpp_signatif::sovereign::{
+        AttestationStatement, ClaimClass, CoverageGrade, SovereignAttestation,
+    };
+    let attestation_service = KeyPair::seeded(Suite::Ed25519, b"ggrid/cn-attest").map_err(fail)?;
+    let quorum_a = KeyPair::seeded(Suite::Ed25519, b"ggrid/quorum-a").map_err(fail)?;
+    let quorum_b = KeyPair::seeded(Suite::Ed25519, b"ggrid/quorum-b").map_err(fail)?;
+    for (id, key) in [
+        ("cn-attestation-service", &attestation_service),
+        ("cn-quorum-a", &quorum_a),
+        ("cn-quorum-b", &quorum_b),
+    ] {
+        let mut node = DelegationNode::new(NodeId::new(id).map_err(fail)?, NodeKind::Delegated);
+        node.register(RegisteredKey {
+            key_id: KeyId::of(key.public()),
+            public: *key.public(),
+        });
+        graph.add_node(node);
+    }
+    let statement = AttestationStatement {
+        segment: "cn-dynamic".into(),
+        state_commitment: cn_segment.state_commitment,
+        claim: ClaimClass::Conformity,
+        value: "pass".into(),
+        as_of: "2030-06-01T08:00:00Z".into(),
+        governing_policy: sealed_policy.policy.policy_id.clone(),
+        governing_policy_version: sealed_policy.policy.version,
+        subject: "urn:unidpp:passport:pack-0001".into(),
+    };
+    let quorum_id = NodeId::new("cn-attestation-quorum").map_err(fail)?;
+    let attestation = SovereignAttestation::issue(
+        statement,
+        "cn-attestation-service",
+        &attestation_service,
+        Some((&quorum_id, 2, &[&quorum_a, &quorum_b])),
+    )
+    .map_err(fail)?;
+    let grade = attestation
+        .verify(&graph)
+        .map_err(|e| CommandError::Failure(format!("sovereign attestation verification: {e}")))?;
+    check(
+        "substitution: the attestation verifies under the verifier's own anchors",
+        grade == CoverageGrade::AttestedByAuthority,
+        "high-stakes conformity, 2-of-3 quorum co-signed",
+    );
+    check(
+        "the attestation binds the governing policy (XB-3 names it)",
+        attestation.binds_policy(&sealed_policy.policy),
+        "cn-dynamic-bms v1 — the verdict will cite it",
+    );
+
+    // The coverage-graded verdict (XB-3): static verified-direct,
+    // dynamic attested-by-authority — one report, both tiers.
+    let coverage = format!(
+        "eu-static: {} | cn-dynamic: {} (governing policy {} v{})",
+        CoverageGrade::VerifiedDirect.token(),
+        CoverageGrade::AttestedByAuthority.token(),
+        attestation.statement.governing_policy,
+        attestation.statement.governing_policy_version,
+    );
+    check(
+        "the verdict is coverage-graded, naming the governing policy",
+        coverage.contains("verified-direct") && coverage.contains("attested-by-authority"),
+        &coverage,
     );
 
     println!();
