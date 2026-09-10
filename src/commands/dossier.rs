@@ -98,6 +98,19 @@ pub fn run(rest: &[String]) -> Result<u8, CommandError> {
         check.attestations_ok,
         check.journal_decisions.len()
     );
+    // CN-4: the spine's log receipt, when carried, verifies offline
+    // and binds THIS dossier's spine (checked in Dossier::verify).
+    if let Some(receipt) = &dossier.receipt {
+        let operator = KeyPair::seeded(Suite::Ed25519, b"ggrid/log-operator")
+            .map_err(|e| CommandError::Failure(format!("operator key: {e}")))?;
+        receipt
+            .verify(operator.public())
+            .map_err(|e| CommandError::Failure(format!("log receipt: {e}")))?;
+        println!(
+            "  log receipt verified: spine committed in log {} at seq {} (CN-4)",
+            receipt.log_id, receipt.seq
+        );
+    }
     println!("  zero calls to foreign synchronous APIs — the dossier is the protocol");
     println!("  {}", report.summary());
     if report

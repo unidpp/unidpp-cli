@@ -405,17 +405,29 @@ pub fn run(rest: &[String]) -> Result<u8, CommandError> {
             .spine
             .proof("eu-static")
             .ok_or_else(|| CommandError::Failure("no eu proof".into()))?;
-        let dossier = Dossier {
+        let mut dossier = Dossier {
             subject: "urn:unidpp:passport:pack-0001".into(),
             policies: vec![open_policy, sealed_policy],
             spine: signed_spine.clone(),
             proofs: vec![eu_proof, proof.clone()],
             attestations: vec![attestation.clone()],
             journal,
+            receipt: None,
         };
+        // CN-4: the spine anchors in the transparency log — one
+        // anchoring chain — and the re-servable receipt rides the
+        // dossier.
+        let operator = KeyPair::seeded(Suite::Ed25519, b"ggrid/log-operator").map_err(fail)?;
+        let mut log = unidpp_signatif::anchor::TransparencyLog::new("unidpp-main");
+        let seq = unidpp_signatif::spine_anchor::anchor_spine(&mut log, &signed_spine);
+        let at = unidpp_model::time::Timestamp::from_secs(1_900_000_000);
+        dossier.receipt = Some(
+            unidpp_signatif::spine_anchor::SpineReceipt::serve(&log, seq, at, &operator)
+                .map_err(fail)?,
+        );
         std::fs::write(&path, dossier.to_json().map_err(fail)?)
             .map_err(|e| CommandError::Failure(format!("dossier write {path}: {e}")))?;
-        println!("  dossier written: {path} — documents, not API calls (XB-5)");
+        println!("  dossier written: {path} — documents, not API calls (XB-5); spine anchored in the log (CN-4)");
     }
 
     println!();
