@@ -4,6 +4,7 @@
 //! keep the CLI's dependency surface at `serde_json`; the grammar is
 //! strict — unknown flags and missing values are usage errors (exit 3).
 
+pub mod conform;
 pub mod create;
 pub mod demo;
 pub mod dossier;
@@ -18,6 +19,9 @@ pub const GRID_USAGE: &str = "unidpp grid [--dossier <path>] — the grid demo";
 pub const DOSSIER_USAGE: &str = "unidpp dossier <path> — verify a dossier offline (XB-5)";
 /// Usage line for `unidpp frozen`.
 pub const FROZEN_USAGE: &str = "unidpp frozen <path> — verify a frozen view air-gapped (SI-1)";
+/// Usage line for `unidpp conform`.
+pub const CONFORM_USAGE: &str =
+    "unidpp conform f1 <frozen-view.json> — run a federation class claim test (FW-3)";
 pub mod pack;
 pub mod resolve;
 pub mod verify;
@@ -61,6 +65,7 @@ pub fn command_usage(command: &str) -> Option<&'static str> {
         "grid" => GRID_USAGE,
         "dossier" => DOSSIER_USAGE,
         "frozen" => FROZEN_USAGE,
+        "conform" => CONFORM_USAGE,
         _ => return None,
     })
 }
@@ -113,6 +118,7 @@ pub fn dispatch(args: &[String]) -> Result<u8, CommandError> {
         "demo" => demo::run(rest),
         "grid" => grid::run(rest),
         "dossier" => dossier::run(rest),
+        "conform" => conform::run(rest),
         "frozen" => frozen::run(rest),
         "help" | "--help" | "-h" => {
             if let Some(sub) = rest.first() {
@@ -183,6 +189,7 @@ mod tests {
     fn every_command_has_help() {
         for command in [
             "create", "event", "pack", "verify", "resolve", "demo", "grid", "dossier", "frozen",
+            "conform",
         ] {
             assert!(
                 command_usage(command).is_some(),
