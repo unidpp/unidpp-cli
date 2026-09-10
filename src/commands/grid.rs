@@ -330,17 +330,45 @@ pub fn run() -> Result<u8, CommandError> {
         "same attestation — evidence under eu-battery, refused under a non-anchoring profile",
     );
 
-    // The coverage-graded verdict (XB-3): static verified-direct,
-    // dynamic attested-by-authority — one report, both tiers.
-    let coverage = format!(
-        "eu-static: {} | cn-dynamic: {} (governing policy {} v{})",
-        CoverageGrade::VerifiedDirect.token(),
-        CoverageGrade::AttestedByAuthority.token(),
-        attestation.statement.governing_policy,
-        attestation.statement.governing_policy_version,
+    // The coverage-graded verdict (XB-3+XB-8): a first-class report
+    // object — static verified-direct, dynamic attested (the grade
+    // the RECEIVING profile accepted) — rendered from the object.
+    use unidpp_s13::coverage::{CoverageEntry, CoverageReport, EvidenceKind};
+    fn evidence_of(grade: CoverageGrade) -> EvidenceKind {
+        match grade {
+            CoverageGrade::VerifiedDirect => EvidenceKind::VerifiedDirect,
+            CoverageGrade::AttestedByAuthority => EvidenceKind::AttestedByAuthority,
+            CoverageGrade::ExplicitlyUnavailable => EvidenceKind::ExplicitlyUnavailable,
+        }
+    }
+    let sealed_grade = accepting_policy.grade(&attestation, "cn-dynamic", at_now);
+    let mut report = CoverageReport::new(
+        "urn:unidpp:passport:pack-0001",
+        "urn:unidpp:profile:eu-battery",
+        at_now,
     );
+    report
+        .entry(CoverageEntry {
+            class: "eu-static".into(),
+            element_set: "urn:unidpp:elements:battery-static".into(),
+            evidence: EvidenceKind::VerifiedDirect,
+            governing_policy: "eu-static-open".into(),
+            governing_policy_version: 1,
+            reading: "conformant".into(),
+            as_of: at_now.into(),
+        })
+        .entry(CoverageEntry {
+            class: "cn-dynamic".into(),
+            element_set: "urn:unidpp:elements:bms-dynamic".into(),
+            evidence: evidence_of(sealed_grade),
+            governing_policy: attestation.statement.governing_policy.clone(),
+            governing_policy_version: attestation.statement.governing_policy_version,
+            reading: attestation.statement.value.clone(),
+            as_of: attestation.statement.as_of.clone(),
+        });
+    let coverage = report.summary();
     check(
-        "the verdict is coverage-graded, naming the governing policy",
+        "the verdict is a coverage report object, naming the governing policy",
         coverage.contains("verified-direct") && coverage.contains("attested-by-authority"),
         &coverage,
     );
