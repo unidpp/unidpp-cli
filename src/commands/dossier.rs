@@ -130,7 +130,7 @@ pub fn run(rest: &[String]) -> Result<u8, CommandError> {
 
 /// The reference verifier's anchors (seeded — a deployment loads its
 /// own key directory; the graph never comes from the dossier).
-fn verifier_graph() -> TrustGraph {
+pub(crate) fn verifier_graph() -> TrustGraph {
     let anchors: Vec<(&str, KeyPair)> = [
         ("cn-samr", b"ggrid/cn-samr" as &[u8]),
         ("weilian-shenzhen", b"ggrid/weilian"),

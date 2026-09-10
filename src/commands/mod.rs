@@ -8,6 +8,7 @@ pub mod create;
 pub mod demo;
 pub mod dossier;
 pub mod event;
+pub mod frozen;
 pub mod grid;
 
 /// `unidpp grid` — the G-GRID demo: one subject, two sovereignty
@@ -15,6 +16,8 @@ pub mod grid;
 pub const GRID_USAGE: &str = "unidpp grid [--dossier <path>] — the grid demo";
 /// Usage line for `unidpp dossier`.
 pub const DOSSIER_USAGE: &str = "unidpp dossier <path> — verify a dossier offline (XB-5)";
+/// Usage line for `unidpp frozen`.
+pub const FROZEN_USAGE: &str = "unidpp frozen <path> — verify a frozen view air-gapped (SI-1)";
 pub mod pack;
 pub mod resolve;
 pub mod verify;
@@ -57,6 +60,7 @@ pub fn command_usage(command: &str) -> Option<&'static str> {
         "demo" => demo::USAGE,
         "grid" => GRID_USAGE,
         "dossier" => DOSSIER_USAGE,
+        "frozen" => FROZEN_USAGE,
         _ => return None,
     })
 }
@@ -109,6 +113,7 @@ pub fn dispatch(args: &[String]) -> Result<u8, CommandError> {
         "demo" => demo::run(rest),
         "grid" => grid::run(rest),
         "dossier" => dossier::run(rest),
+        "frozen" => frozen::run(rest),
         "help" | "--help" | "-h" => {
             if let Some(sub) = rest.first() {
                 let usage = command_usage(sub).ok_or_else(|| {
@@ -177,7 +182,7 @@ mod tests {
     #[test]
     fn every_command_has_help() {
         for command in [
-            "create", "event", "pack", "verify", "resolve", "demo", "grid", "dossier",
+            "create", "event", "pack", "verify", "resolve", "demo", "grid", "dossier", "frozen",
         ] {
             assert!(
                 command_usage(command).is_some(),

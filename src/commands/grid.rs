@@ -24,7 +24,8 @@ const SEALED_STATE: &[u8] = b"cycle_count=412,voltage=3.71,temp=28.4";
 /// Run the grid demo (G-GRID): the whole Phase-1 pipeline, verdicts
 /// printed; exit PASS only when every check holds.
 pub fn run(rest: &[String]) -> Result<u8, CommandError> {
-    let dossier_path = parse_dossier_flag(rest);
+    let dossier_path = parse_value_flag(rest, "--dossier");
+    let frozen_path = parse_value_flag(rest, "--frozen");
     let mut ok = 0usize;
     let mut total = 0usize;
     let mut check = |label: &str, passed: bool, detail: &str| {
@@ -428,6 +429,51 @@ pub fn run(rest: &[String]) -> Result<u8, CommandError> {
         std::fs::write(&path, dossier.to_json().map_err(fail)?)
             .map_err(|e| CommandError::Failure(format!("dossier write {path}: {e}")))?;
         println!("  dossier written: {path} — documents, not API calls (XB-5); spine anchored in the log (CN-4)");
+
+        // SI-1: the frozen view — the self-describing publication
+        // (payload + descriptor + lens + spine-proved inputs + the
+        // bundle). `unidpp frozen <path>` re-derives it air-gapped.
+        if let Some(frozen) = frozen_path {
+            use unidpp_signatif::frozen::{
+                example::battery_lens, FrozenInput, FrozenView, LensMetadata, TransformStep,
+            };
+            let inputs = vec![FrozenInput {
+                name: "static".into(),
+                segment: "eu-static".into(),
+                bytes: open_state.to_vec(),
+            }];
+            let lens = LensMetadata {
+                profile: "urn:unidpp:profile:eu-battery".into(),
+                transforms: vec![TransformStep {
+                    reference: "urn:unidpp:transform:battery-view".into(),
+                    version: 1,
+                }],
+                input_segments: vec![("static".into(), "eu-static".into())],
+            };
+            let view = FrozenView::freeze(
+                "urn:unidpp:passport:pack-0001",
+                battery_lens(&inputs),
+                unidpp_model::BATTERY_FROZEN,
+                lens,
+                inputs,
+                dossier,
+                vec![
+                    "verify the bundle under your own anchors".into(),
+                    "check each input against its spine commitment".into(),
+                    "re-execute the lens over the inputs".into(),
+                ],
+                "2030-06-01T08:00:00Z",
+            )
+            .map_err(fail)?;
+            std::fs::write(
+                &frozen,
+                serde_json::to_vec_pretty(&view).map_err(|e| {
+                    CommandError::Failure(format!("frozen view serialization: {e}"))
+                })?,
+            )
+            .map_err(|e| CommandError::Failure(format!("frozen view write {frozen}: {e}")))?;
+            println!("  frozen view written: {frozen} — the F1 publication act (SI-1)");
+        }
     }
 
     println!();
@@ -442,10 +488,10 @@ pub fn run(rest: &[String]) -> Result<u8, CommandError> {
     }
 }
 
-fn parse_dossier_flag(rest: &[String]) -> Option<String> {
+fn parse_value_flag(rest: &[String], flag: &str) -> Option<String> {
     let mut it = rest.iter();
     while let Some(arg) = it.next() {
-        if arg == "--dossier" {
+        if arg == flag {
             return it.next().cloned();
         }
     }
