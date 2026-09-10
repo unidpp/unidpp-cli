@@ -1048,6 +1048,7 @@ dependencies = [
  "unidpp-event",
  "unidpp-grid",
  "unidpp-model",
+ "unidpp-s13",
  "unidpp-transform",
  "unidpp-verdict",
  "x25519-dalek",

@@ -306,6 +306,30 @@ pub fn run() -> Result<u8, CommandError> {
         "cn-dynamic-bms v1 — the verdict will cite it",
     );
 
+    // XB-4: acceptance — the RECEIVING profile decides whether the
+    // attestation is evidence AT ALL. Same attestation, two profiles.
+    use unidpp_signatif::acceptance::AcceptancePolicy;
+    let accepting_policy = AcceptancePolicy {
+        profile: "urn:unidpp:profile:eu-battery".into(),
+        attestation_services: vec!["cn-attestation-service".into()],
+        accepted_claims: vec![ClaimClass::Conformity],
+        minimum_quorum: 2,
+        max_age_secs: Some(3600),
+        element_modes: Default::default(),
+    };
+    let mut strict_policy = accepting_policy.clone();
+    strict_policy.profile = "urn:unidpp:profile:eu-battery-strict".into();
+    strict_policy.attestation_services = vec![];
+    let at_now = "2030-06-01T08:30:00Z";
+    check(
+        "acceptance: the receiving profile decides (XB-4)",
+        accepting_policy.grade(&attestation, "cn-dynamic", at_now)
+            == CoverageGrade::AttestedByAuthority
+            && strict_policy.grade(&attestation, "cn-dynamic", at_now)
+                == CoverageGrade::ExplicitlyUnavailable,
+        "same attestation — evidence under eu-battery, refused under a non-anchoring profile",
+    );
+
     // The coverage-graded verdict (XB-3): static verified-direct,
     // dynamic attested-by-authority — one report, both tiers.
     let coverage = format!(
