@@ -26,6 +26,7 @@ const SEALED_STATE: &[u8] = b"cycle_count=412,voltage=3.71,temp=28.4";
 pub fn run(rest: &[String]) -> Result<u8, CommandError> {
     let dossier_path = parse_value_flag(rest, "--dossier");
     let frozen_path = parse_value_flag(rest, "--frozen");
+    let anchors_path = parse_value_flag(rest, "--anchors");
     let mut ok = 0usize;
     let mut total = 0usize;
     let mut check = |label: &str, passed: bool, detail: &str| {
@@ -472,6 +473,36 @@ pub fn run(rest: &[String]) -> Result<u8, CommandError> {
             .map_err(|e| CommandError::Failure(format!("dossier write {path}: {e}")))?;
         println!("  dossier written: {path} — documents, not API calls (XB-5); spine anchored in the log (CN-4)");
 
+        // The verifier's anchor set, exported for third-party claim
+        // tests (a foreign harness verifies under ITS copy of these
+        // pinned public keys — never anything carried in the view).
+        if let Some(anchors_file) = anchors_path {
+            let mut anchors = serde_json::Map::new();
+            for (id, key) in [
+                ("cn-samr", samr_key.public()),
+                ("weilian-shenzhen", custodian_key.public()),
+                ("de-zoll", de_zoll_key.public()),
+                ("cn-attestation-service", attestation_service.public()),
+                ("cn-quorum-a", quorum_a.public()),
+                ("cn-quorum-b", quorum_b.public()),
+            ] {
+                anchors.insert(
+                    id.to_string(),
+                    serde_json::json!({
+                        "suite": "ed25519",
+                        "public_hex": hex(key.as_bytes()),
+                    }),
+                );
+            }
+            std::fs::write(
+                &anchors_file,
+                serde_json::to_vec_pretty(&serde_json::Value::Object(anchors))
+                    .map_err(|e| CommandError::Failure(format!("anchors serialization: {e}")))?,
+            )
+            .map_err(|e| CommandError::Failure(format!("anchors write {anchors_file}: {e}")))?;
+            println!("  anchors written: {anchors_file} — the verifier's pinned key set");
+        }
+
         // SI-1: the frozen view — the self-describing publication
         // (payload + descriptor + lens + spine-proved inputs + the
         // bundle). `unidpp frozen <path>` re-derives it air-gapped.
@@ -630,6 +661,16 @@ pub fn run(rest: &[String]) -> Result<u8, CommandError> {
         ),
     );
 
+    // TR-1/TR-2: the party model at intake — the regulator's class
+    // admits the policy signature; a manufacturer's class would not.
+    use unidpp_signatif::party::{intake_permits, ObjectClass, PartyClass};
+    check(
+        "the signing matrix admits the authority's class and refuses out-of-class (TR-2)",
+        intake_permits(PartyClass::Government, ObjectClass::SegmentPolicy).is_ok()
+            && intake_permits(PartyClass::Manufacturer, ObjectClass::SegmentPolicy).is_err(),
+        "a regulator (government) signs segment policies; a manufacturer's signature on          one is refused at intake, both classes named",
+    );
+
     println!();
     println!(
         "grid verdict: {}/{} — the sealed segment is PROVEN without being SEEN",
@@ -640,6 +681,10 @@ pub fn run(rest: &[String]) -> Result<u8, CommandError> {
     } else {
         Ok(exit::FAIL)
     }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn report_digest_of(report: &unidpp_s13::coverage::CoverageReport) -> [u8; 32] {
