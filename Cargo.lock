@@ -979,6 +979,7 @@ dependencies = [
  "unidpp-grid",
  "unidpp-model",
  "unidpp-s13",
+ "unidpp-semantics",
  "unidpp-signatif",
  "unidpp-tier-a",
  "unidpp-verdict",
@@ -1034,6 +1035,16 @@ dependencies = [
 
 [[package]]
 name = "unidpp-s13"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "unidpp-grid",
+ "unidpp-model",
+]
+
+[[package]]
+name = "unidpp-semantics"
 version = "0.1.0"
 dependencies = [
  "serde",

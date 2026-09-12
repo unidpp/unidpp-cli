@@ -39,5 +39,6 @@ name = "unidpp"
 path = "src/main.rs"
 
 [dev-dependencies]
+unidpp-semantics = { path = "../unidpp-core/crates/semantics" }
 # test-only QR generator (the decode path is rqrr)
 qrcode = "0.14"
