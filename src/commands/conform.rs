@@ -525,14 +525,12 @@ fn run_f5(family_dir: Option<&str>) -> Result<bool, CommandError> {
 
     // SIGNATIF objects.
     let signatif_dir = root.join("unidpp-signatif/fixtures/canonical");
-    if let Some(doc) = load_json(
+    if let Ok(doc) = load_json(
         signatif_dir
             .join("interop-declaration.json")
             .to_str()
             .unwrap_or_default(),
-    )
-    .ok()
-    {
+    ) {
         let got = serde_json::from_value::<unidpp_signatif::declaration::InteropDeclaration>(
             doc.get("declaration").cloned().unwrap_or_default(),
         )
@@ -548,14 +546,12 @@ fn run_f5(family_dir: Option<&str>) -> Result<bool, CommandError> {
             got,
         );
     }
-    if let Some(doc) = load_json(
+    if let Ok(doc) = load_json(
         signatif_dir
             .join("frozen-view.json")
             .to_str()
             .unwrap_or_default(),
-    )
-    .ok()
-    {
+    ) {
         let got =
             serde_json::from_value::<FrozenView>(doc.get("view").cloned().unwrap_or_default())
                 .ok()
@@ -570,14 +566,12 @@ fn run_f5(family_dir: Option<&str>) -> Result<bool, CommandError> {
             got,
         );
     }
-    if let Some(doc) = load_json(
+    if let Ok(doc) = load_json(
         signatif_dir
             .join("s13-signed-exchange.json")
             .to_str()
             .unwrap_or_default(),
-    )
-    .ok()
-    {
+    ) {
         // The exchange pins no digests itself; the objects must parse
         // and their canonical forms must be stable across a round
         // trip through serialization.
@@ -604,14 +598,12 @@ fn run_f5(family_dir: Option<&str>) -> Result<bool, CommandError> {
 
     // The grid.
     let grid_dir = root.join("unidpp-core/crates/grid/fixtures/canonical");
-    if let Some(doc) = load_json(
+    if let Ok(doc) = load_json(
         grid_dir
             .join("segment-commitment.json")
             .to_str()
             .unwrap_or_default(),
-    )
-    .ok()
-    {
+    ) {
         let state = decode_hex(
             doc.get("state_hex")
                 .and_then(|v| v.as_str())
@@ -627,7 +619,7 @@ fn run_f5(family_dir: Option<&str>) -> Result<bool, CommandError> {
             hex(&unidpp_grid::Segment::commit_state(&state)),
         );
     }
-    if let Some(doc) = load_json(grid_dir.join("policy.json").to_str().unwrap_or_default()).ok() {
+    if let Ok(doc) = load_json(grid_dir.join("policy.json").to_str().unwrap_or_default()) {
         let got = serde_json::from_value::<unidpp_grid::PolicyObject>(
             doc.get("policy").cloned().unwrap_or_default(),
         )
@@ -646,14 +638,12 @@ fn run_f5(family_dir: Option<&str>) -> Result<bool, CommandError> {
 
     // The mapping chain.
     let semantics_dir = root.join("unidpp-core/crates/semantics/fixtures/canonical");
-    if let Some(doc) = load_json(
+    if let Ok(doc) = load_json(
         semantics_dir
             .join("mapping-chain.json")
             .to_str()
             .unwrap_or_default(),
-    )
-    .ok()
-    {
+    ) {
         let got = serde_json::from_value::<MappingItem>(
             doc.get("correspondence").cloned().unwrap_or_default(),
         )
