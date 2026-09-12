@@ -27,6 +27,7 @@ pub fn run(rest: &[String]) -> Result<u8, CommandError> {
     let dossier_path = parse_value_flag(rest, "--dossier");
     let frozen_path = parse_value_flag(rest, "--frozen");
     let anchors_path = parse_value_flag(rest, "--anchors");
+    let route_out_path = parse_value_flag(rest, "--route-out");
     let mut ok = 0usize;
     let mut total = 0usize;
     let mut check = |label: &str, passed: bool, detail: &str| {
@@ -429,6 +430,20 @@ pub fn run(rest: &[String]) -> Result<u8, CommandError> {
         replayed.digest() == report.digest(),
         &format!("route {} steps, replay digest matches", route.steps.len()),
     );
+    // The route as an artifact (SI-11's portability claim made
+    // concrete): the recorded trace and the report it reproduces,
+    // exported as one JSON document for any verifier — including a
+    // foreign implementation — to replay.
+    if let Some(path) = route_out_path {
+        let body = serde_json::to_string_pretty(&report)
+            .map_err(|e| CommandError::Failure(format!("cannot serialize the route: {e}")))?;
+        std::fs::write(&path, format!("{body}\n"))
+            .map_err(|e| CommandError::Failure(format!("cannot write `{path}`: {e}")))?;
+        println!(
+            "  [ok]   route artifact written — {path} ({} steps; replay reproduces the report)",
+            route.steps.len()
+        );
+    }
 
     // XB-5: the dossier — everything the foreign verifier needs, as
     // signed documents. The offline path (`unidpp dossier <path>`)
