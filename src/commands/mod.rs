@@ -21,7 +21,14 @@ pub const DOSSIER_USAGE: &str = "unidpp dossier <path> — verify a dossier offl
 pub const FROZEN_USAGE: &str = "unidpp frozen <path> — verify a frozen view air-gapped (SI-1)";
 /// Usage line for `unidpp conform`.
 pub const CONFORM_USAGE: &str =
-    "unidpp conform f1 <frozen-view.json> — run a federation class claim test (FW-3)";
+    "unidpp conform <class> <material> — run a federation class claim test (FW-3)
+
+CLASSES (Clause 11; every class's material is public):
+  f1 <frozen-view.json> [anchors.json]   publishes verifiable frozen views
+  f2 <signed-exchange.json>              S13 protocol participant
+  f3 <mapping-chain.json>                mapping-capable
+  f4 <view-a.json> <view-b.json> [anchors.json]  shared-profile adopter
+  f5 [family-dir]                        full core (the golden-vector sweep)";
 pub mod pack;
 pub mod resolve;
 pub mod verify;
