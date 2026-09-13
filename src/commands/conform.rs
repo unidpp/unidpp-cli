@@ -481,100 +481,147 @@ fn run_f5(family_dir: Option<&str>) -> Result<bool, CommandError> {
         root.display()
     );
 
-    // S13 messages.
-    let s13_dir = root.join("unidpp-core/crates/s13/fixtures/canonical");
-    for (name, derive) in [
-        ("request.json", "request"),
-        ("response.json", "response"),
-        ("verification-route.json", "route"),
-    ] {
-        let Some(doc) = load_json(s13_dir.join(name).to_str().unwrap_or_default()).ok() else {
+    // The sweep's table: one row per fixture — where the object
+    // rides in the JSON, the field the pin lives in, and how to
+    // re-derive the bytes. A new fixture family is a row here, not
+    // a copied branch.
+    let rows: Vec<(&str, &str, &str, &str, Derive)> = vec![
+        // S13 messages
+        (
+            "unidpp-core/crates/s13/fixtures/canonical/request.json",
+            "request",
+            "canonical_hex",
+            "",
+            Derive::S13Request,
+        ),
+        (
+            "unidpp-core/crates/s13/fixtures/canonical/response.json",
+            "response",
+            "canonical_hex",
+            "",
+            Derive::S13Response,
+        ),
+        (
+            "unidpp-core/crates/s13/fixtures/canonical/verification-route.json",
+            "route",
+            "digest_hex",
+            "",
+            Derive::RouteDigest,
+        ),
+        // SIGNATIF objects
+        (
+            "unidpp-signatif/fixtures/canonical/interop-declaration.json",
+            "declaration",
+            "canonical_hex",
+            "",
+            Derive::Declaration,
+        ),
+        (
+            "unidpp-signatif/fixtures/canonical/frozen-view.json",
+            "view",
+            "canonical_hex",
+            "",
+            Derive::FrozenView,
+        ),
+        // The grid
+        (
+            "unidpp-core/crates/grid/fixtures/canonical/policy.json",
+            "policy",
+            "canonical_hex",
+            "",
+            Derive::Policy,
+        ),
+        // The mapping discipline
+        (
+            "unidpp-core/crates/semantics/fixtures/canonical/mapping-chain.json",
+            "correspondence",
+            "correspondence_canonical_hex",
+            "",
+            Derive::MappingItem,
+        ),
+        // Segment commitment: a raw-hex state, not a nested object
+        (
+            "unidpp-core/crates/grid/fixtures/canonical/segment-commitment.json",
+            "",
+            "commitment_hex",
+            "state_hex",
+            Derive::SegmentCommitment,
+        ),
+    ];
+
+    for (rel, object_key, pin_key, raw_key, derive) in rows {
+        let path = root.join(rel);
+        let name = std::path::Path::new(rel)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(rel);
+        let Some(doc) = load_json(path.to_str().unwrap_or_default()).ok() else {
+            tally.total += 1;
+            tally.failed += 1;
+            println!("  [FAIL] {name}: fixture unreadable");
             continue;
         };
         let got = match derive {
-            "request" => serde_json::from_value::<unidpp_s13::S13Request>(
-                doc.get("request").cloned().unwrap_or_default(),
+            Derive::S13Request => serde_json::from_value::<unidpp_s13::S13Request>(
+                doc.get(object_key).cloned().unwrap_or_default(),
             )
             .ok()
             .map(|r| hex(&r.canonical_bytes())),
-            "response" => serde_json::from_value::<unidpp_s13::S13Response>(
-                doc.get("response").cloned().unwrap_or_default(),
+            Derive::S13Response => serde_json::from_value::<unidpp_s13::S13Response>(
+                doc.get(object_key).cloned().unwrap_or_default(),
             )
             .ok()
             .map(|r| hex(&r.canonical_bytes())),
-            _ => serde_json::from_value::<unidpp_s13::route::VerificationRoute>(
-                doc.get("route").cloned().unwrap_or_default(),
+            Derive::RouteDigest => serde_json::from_value::<unidpp_s13::route::VerificationRoute>(
+                doc.get(object_key).cloned().unwrap_or_default(),
             )
             .ok()
             .map(|r| hex(&r.digest())),
+            Derive::Declaration => serde_json::from_value::<
+                unidpp_signatif::declaration::InteropDeclaration,
+            >(doc.get(object_key).cloned().unwrap_or_default())
+            .ok()
+            .map(|d| hex(&d.canonical_bytes())),
+            Derive::FrozenView => serde_json::from_value::<FrozenView>(
+                doc.get(object_key).cloned().unwrap_or_default(),
+            )
+            .ok()
+            .map(|v| hex(&v.canonical_bytes())),
+            Derive::Policy => serde_json::from_value::<unidpp_grid::PolicyObject>(
+                doc.get(object_key).cloned().unwrap_or_default(),
+            )
+            .ok()
+            .map(|p| hex(&p.canonical_bytes())),
+            Derive::MappingItem => serde_json::from_value::<MappingItem>(
+                doc.get(object_key).cloned().unwrap_or_default(),
+            )
+            .ok()
+            .map(|m| hex(&m.canonical_bytes())),
+            Derive::SegmentCommitment => {
+                // The state rides as raw hex; the commitment is
+                // derived from the bytes directly.
+                doc.get(raw_key)
+                    .and_then(|v| v.as_str())
+                    .and_then(|h| decode_hex(h).ok())
+                    .map(|state| hex(&unidpp_grid::Segment::commit_state(&state)))
+            }
         }
         .unwrap_or_default();
         check(
             &mut tally,
             name,
-            doc.get(if derive == "route" {
-                "digest_hex"
-            } else {
-                "canonical_hex"
-            })
-            .and_then(|v| v.as_str())
-            .unwrap_or_default(),
+            doc.get(pin_key)
+                .and_then(|v| v.as_str())
+                .unwrap_or_default(),
             got,
         );
     }
 
-    // SIGNATIF objects.
-    let signatif_dir = root.join("unidpp-signatif/fixtures/canonical");
-    if let Ok(doc) = load_json(
-        signatif_dir
-            .join("interop-declaration.json")
-            .to_str()
-            .unwrap_or_default(),
-    ) {
-        let got = serde_json::from_value::<unidpp_signatif::declaration::InteropDeclaration>(
-            doc.get("declaration").cloned().unwrap_or_default(),
-        )
-        .ok()
-        .map(|d| hex(&d.canonical_bytes()))
-        .unwrap_or_default();
-        check(
-            &mut tally,
-            "interop-declaration.json",
-            doc.get("canonical_hex")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default(),
-            got,
-        );
-    }
-    if let Ok(doc) = load_json(
-        signatif_dir
-            .join("frozen-view.json")
-            .to_str()
-            .unwrap_or_default(),
-    ) {
-        let got =
-            serde_json::from_value::<FrozenView>(doc.get("view").cloned().unwrap_or_default())
-                .ok()
-                .map(|v| hex(&v.canonical_bytes()))
-                .unwrap_or_default();
-        check(
-            &mut tally,
-            "frozen-view.json",
-            doc.get("canonical_hex")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default(),
-            got,
-        );
-    }
-    if let Ok(doc) = load_json(
-        signatif_dir
-            .join("s13-signed-exchange.json")
-            .to_str()
-            .unwrap_or_default(),
-    ) {
-        // The exchange pins no digests itself; the objects must parse
-        // and their canonical forms must be stable across a round
-        // trip through serialization.
+    // The signed exchange pins no digests of its own; its objects
+    // must parse and the canonical form stay stable across a
+    // serialization round trip.
+    let exchange = root.join("unidpp-signatif/fixtures/canonical/s13-signed-exchange.json");
+    if let Ok(doc) = load_json(exchange.to_str().unwrap_or_default()) {
         let parsed = serde_json::from_value::<unidpp_s13::S13Response>(
             doc.pointer("/signed_response/response")
                 .cloned()
@@ -596,70 +643,6 @@ fn run_f5(family_dir: Option<&str>) -> Result<bool, CommandError> {
         }
     }
 
-    // The grid.
-    let grid_dir = root.join("unidpp-core/crates/grid/fixtures/canonical");
-    if let Ok(doc) = load_json(
-        grid_dir
-            .join("segment-commitment.json")
-            .to_str()
-            .unwrap_or_default(),
-    ) {
-        let state = decode_hex(
-            doc.get("state_hex")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default(),
-        )
-        .unwrap_or_default();
-        check(
-            &mut tally,
-            "segment-commitment.json",
-            doc.get("commitment_hex")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default(),
-            hex(&unidpp_grid::Segment::commit_state(&state)),
-        );
-    }
-    if let Ok(doc) = load_json(grid_dir.join("policy.json").to_str().unwrap_or_default()) {
-        let got = serde_json::from_value::<unidpp_grid::PolicyObject>(
-            doc.get("policy").cloned().unwrap_or_default(),
-        )
-        .ok()
-        .map(|p| hex(&p.canonical_bytes()))
-        .unwrap_or_default();
-        check(
-            &mut tally,
-            "policy.json",
-            doc.get("canonical_hex")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default(),
-            got,
-        );
-    }
-
-    // The mapping chain.
-    let semantics_dir = root.join("unidpp-core/crates/semantics/fixtures/canonical");
-    if let Ok(doc) = load_json(
-        semantics_dir
-            .join("mapping-chain.json")
-            .to_str()
-            .unwrap_or_default(),
-    ) {
-        let got = serde_json::from_value::<MappingItem>(
-            doc.get("correspondence").cloned().unwrap_or_default(),
-        )
-        .ok()
-        .map(|m| hex(&m.canonical_bytes()))
-        .unwrap_or_default();
-        check(
-            &mut tally,
-            "mapping-chain.json",
-            doc.get("correspondence_canonical_hex")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default(),
-            got,
-        );
-    }
-
     println!(
         "F5: {} — {}/{} golden vectors reproduce in this binary",
         if tally.failed == 0 { "PASS" } else { "FAIL" },
@@ -667,4 +650,16 @@ fn run_f5(family_dir: Option<&str>) -> Result<bool, CommandError> {
         tally.total
     );
     Ok(tally.failed != 0)
+}
+
+/// How one fixture's canonical bytes are re-derived.
+enum Derive {
+    S13Request,
+    S13Response,
+    RouteDigest,
+    Declaration,
+    FrozenView,
+    Policy,
+    MappingItem,
+    SegmentCommitment,
 }
