@@ -36,33 +36,146 @@ pub mod verify;
 use crate::exit;
 
 /// The top-level usage text (`unidpp help`).
-pub const USAGE: &str = "\
-unidpp - the UniDPP command-line verifier (what an officer's terminal runs)
+/// One command: its name, its one-line help and its run function —
+/// the single table the dispatcher, the help text and the exported
+/// contract (`commands.json`) all read from. Adding a command is
+/// adding one row.
+pub struct CommandSpec {
+    /// The command name (`unidpp <name>`).
+    pub name: &'static str,
+    /// The one-line help, rendered in the top-level usage.
+    pub summary: &'static str,
+    /// The command's entry point.
+    pub run: fn(&[String]) -> Result<u8, CommandError>,
+}
 
-USAGE:
-    unidpp <COMMAND> [OPTIONS]
+/// The command table: one row per command. The dispatcher, the
+/// top-level help and the exported contract () all
+/// read from this table; adding a command is adding one row.
+pub const COMMANDS: &[CommandSpec] = &[
+    CommandSpec {
+        name: "create",
+        summary: "mint a passport document (core skeleton + empty log) as JSON",
+        run: create::run,
+    },
+    CommandSpec {
+        name: "event",
+        summary: "append a typed event to a passport's log (optionally Ed25519-signed)",
+        run: event::run,
+    },
+    CommandSpec {
+        name: "pack",
+        summary: "mint the Tier-A offline pack from a passport (optionally signed)",
+        run: pack::run,
+    },
+    CommandSpec {
+        name: "verify",
+        summary: "unpack a pack, check it, and print the graded verdict",
+        run: verify::run,
+    },
+    CommandSpec {
+        name: "resolve",
+        summary: "normalize a scanned carrier (GS1 DL / GB/T 33993 / EAN-13 / URN)",
+        run: resolve::run,
+    },
+    CommandSpec {
+        name: "grid",
+        summary: "run the two-segment grid demonstration (spine, route, coverage)",
+        run: grid::run,
+    },
+    CommandSpec {
+        name: "dossier",
+        summary: "verify a dossier offline, with zero calls to foreign systems",
+        run: dossier::run,
+    },
+    CommandSpec {
+        name: "frozen",
+        summary: "verify a frozen view air-gapped (SI-1)",
+        run: frozen::run,
+    },
+    CommandSpec {
+        name: "conform",
+        summary: "run a conformance-class claim test on public material",
+        run: conform::run,
+    },
+    CommandSpec {
+        name: "demo",
+        summary: "run a narrated demonstration scenario",
+        run: demo::run,
+    },
+];
 
-COMMANDS:
-    create    mint a passport document (core skeleton + empty log) as JSON
-    event     append a typed event to a passport's log (optionally Ed25519-signed)
-    pack      mint the Tier-A offline pack from a passport (optionally signed)
-    verify    unpack a pack, check it, and print the graded verdict
-    resolve   normalize a scanned carrier (GS1 DL / GB/T 33993 / EAN-13 / URN)
-    grid      run the two-segment grid demonstration (spine, route, coverage)
-    dossier   verify a dossier offline, with zero calls to foreign systems
-    frozen    verify a frozen view air-gapped (SI-1)
-    conform   run a conformance-class claim test on public material
-    demo      run a narrated demonstration scenario
-    help      print this help
+/// Look a command up in the table.
+pub fn command(name: &str) -> Option<&'static CommandSpec> {
+    COMMANDS.iter().find(|c| c.name == name)
+}
 
-EXIT CODES:
-    0  verdict Pass
-    1  verdict Degraded (reason always printed)
-    2  verdict Fail (or an operational failure of a non-verify command)
-    3  usage error
+/// The top-level help, rendered from the command table.
+pub fn usage_text() -> String {
+    use std::fmt::Write as _;
+    let mut out = String::from(
+        "unidpp - the UniDPP command-line verifier (what an officer's terminal runs)\n\nUSAGE:\n    unidpp <COMMAND> [OPTIONS]\n\nCOMMANDS:\n",
+    );
+    for spec in COMMANDS {
+        let _ = writeln!(out, "    {:<9} {}", spec.name, spec.summary);
+    }
+    let _ = write!(out, "    help      print this help\n\nEXIT CODES:\n    0  verdict Pass\n    1  verdict Degraded (reason always printed)\n    2  verdict Fail (or an operational failure of a non-verify command)\n    3  usage error\n\nSEE:\n    unidpp help <command> for per-command options and payload examples");
+    out
+}
 
-SEE:
-    unidpp help <command> for per-command options and payload examples";
+/// The exported command table (`commands.json`): the machine-readable
+/// form of the same single source, locked to it by a golden test.
+pub fn commands_json() -> String {
+    let commands: Vec<serde_json::Value> = COMMANDS
+        .iter()
+        .map(|spec| serde_json::json!({"name": spec.name, "summary": spec.summary}))
+        .collect();
+    serde_json::to_string_pretty(&serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "commands": commands,
+    }))
+    .expect("command table serializes")
+}
+
+#[cfg(test)]
+mod command_table_tests {
+    use super::*;
+
+    #[test]
+    fn the_golden_matches_the_committed_command_table() {
+        assert_eq!(commands_json(), include_str!("../../commands.json"));
+    }
+
+    #[test]
+    #[ignore = "regenerates commands.json after a table change: cargo test -- --ignored export"]
+    fn export_golden() {
+        std::fs::write(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/commands.json"),
+            commands_json(),
+        )
+        .expect("golden written");
+    }
+
+    #[test]
+    fn the_help_lists_every_command() {
+        let help = usage_text();
+        for spec in COMMANDS {
+            assert!(help.contains(spec.name), "help omits {}", spec.name);
+        }
+    }
+
+    #[test]
+    fn every_command_has_a_per_command_usage() {
+        for spec in COMMANDS {
+            assert!(
+                command_usage(spec.name).is_some(),
+                "no `unidpp help {}` text",
+                spec.name
+            );
+        }
+    }
+}
+
 
 /// Per-command usage texts (`unidpp help <command>`).
 pub fn command_usage(command: &str) -> Option<&'static str> {
@@ -120,17 +233,10 @@ pub fn dispatch(args: &[String]) -> Result<u8, CommandError> {
         return Err(CommandError::Usage("missing command".to_string()));
     };
     let rest = &args[1..];
+    if let Some(spec) = command(first) {
+        return (spec.run)(rest);
+    }
     match first.as_str() {
-        "create" => create::run(rest),
-        "event" => event::run(rest),
-        "pack" => pack::run(rest),
-        "verify" => verify::run(rest),
-        "resolve" => resolve::run(rest),
-        "demo" => demo::run(rest),
-        "grid" => grid::run(rest),
-        "dossier" => dossier::run(rest),
-        "conform" => conform::run(rest),
-        "frozen" => frozen::run(rest),
         "help" | "--help" | "-h" => {
             if let Some(sub) = rest.first() {
                 let usage = command_usage(sub).ok_or_else(|| {
@@ -138,7 +244,7 @@ pub fn dispatch(args: &[String]) -> Result<u8, CommandError> {
                 })?;
                 println!("{usage}");
             } else {
-                println!("{USAGE}");
+                println!("{}", usage_text());
             }
             Ok(exit::PASS)
         }

@@ -1,0 +1,45 @@
+{
+  "commands": [
+    {
+      "name": "create",
+      "summary": "mint a passport document (core skeleton + empty log) as JSON"
+    },
+    {
+      "name": "event",
+      "summary": "append a typed event to a passport's log (optionally Ed25519-signed)"
+    },
+    {
+      "name": "pack",
+      "summary": "mint the Tier-A offline pack from a passport (optionally signed)"
+    },
+    {
+      "name": "verify",
+      "summary": "unpack a pack, check it, and print the graded verdict"
+    },
+    {
+      "name": "resolve",
+      "summary": "normalize a scanned carrier (GS1 DL / GB/T 33993 / EAN-13 / URN)"
+    },
+    {
+      "name": "grid",
+      "summary": "run the two-segment grid demonstration (spine, route, coverage)"
+    },
+    {
+      "name": "dossier",
+      "summary": "verify a dossier offline, with zero calls to foreign systems"
+    },
+    {
+      "name": "frozen",
+      "summary": "verify a frozen view air-gapped (SI-1)"
+    },
+    {
+      "name": "conform",
+      "summary": "run a conformance-class claim test on public material"
+    },
+    {
+      "name": "demo",
+      "summary": "run a narrated demonstration scenario"
+    }
+  ],
+  "version": "0.1.0"
+}
