@@ -48,6 +48,10 @@ COMMANDS:
     pack      mint the Tier-A offline pack from a passport (optionally signed)
     verify    unpack a pack, check it, and print the graded verdict
     resolve   normalize a scanned carrier (GS1 DL / GB/T 33993 / EAN-13 / URN)
+    grid      run the two-segment grid demonstration (spine, route, coverage)
+    dossier   verify a dossier offline, with zero calls to foreign systems
+    frozen    verify a frozen view air-gapped (SI-1)
+    conform   run a conformance-class claim test on public material
     demo      run a narrated demonstration scenario
     help      print this help
 
