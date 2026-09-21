@@ -175,8 +175,6 @@ mod command_table_tests {
         }
     }
 }
-
-
 /// Per-command usage texts (`unidpp help <command>`).
 pub fn command_usage(command: &str) -> Option<&'static str> {
     Some(match command {
